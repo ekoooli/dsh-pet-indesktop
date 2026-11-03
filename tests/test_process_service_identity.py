@@ -95,6 +95,9 @@ def test_global_config_only_carries_the_default_role(shell_with_slot_role):
 def test_island_name_follows_the_slot_role(shell_with_slot_role):
     """灵动岛名读当前身份，不是全局面的默认角色。"""
     shell = shell_with_slot_role
+    island_cfg = dict(shell.config.get("dynamic_island") or {})
+    island_cfg["enabled"] = True
+    shell.config.set("dynamic_island", island_cfg)
     shell._sync_dynamic_island()
 
     assert shell.island is not None
