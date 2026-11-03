@@ -493,8 +493,8 @@ FEATURES: dict[str, FeatureSpec] = {
     #         + FPS 两键（game_fps_target_mode / game_fps_process）
     #         + 余额五键（balance_refresh_minutes / balance_tier_*）
     #   `island_network_enabled` 已废弃为写入来源（只在归一化时单向迁进 island_metrics），
-    #   不作为模块键登记。`dynamic_island.enabled` 两处缺省值不一致（config.py:611=True
-    #   vs 设置页 .get(...,False)），门控不得用它判「模块是否激活」。
+    #   不作为模块键登记。`dynamic_island.enabled` 是行为开关（config 与设置页
+    #   缺省值已对齐为 False），门控不得用它判「模块是否激活」。
     #   类别归「联动」：岛的读数是系统指标，但它存在的价值是把 AI/Agent/余额状态
     #   聚合到桌面，与 agent_link 同组；FPS/余额是它的子能力，不单独成模块。
     "dynamic_island": FeatureSpec(

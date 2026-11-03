@@ -844,6 +844,9 @@ def test_discard_revokes_the_global_nested_draft(tmp_path, app, monkeypatch):
 
     shared, main = _shared_route(tmp_path)
     _profile_exists(tmp_path, {"scale": 0.8})
+    # 灵动岛默认关闭（2026-11-03）；本用例验证嵌套 dict 草稿作废，显式把岛打开。
+    main.set("dynamic_island", {"enabled": True})
+    main.save()
     assert main.get("dynamic_island")["enabled"] is True, "前提：盘上灵动岛是开着的"
     dialog = _shared_dialog(shared)
     form = dialog.config

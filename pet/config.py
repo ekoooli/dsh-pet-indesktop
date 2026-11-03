@@ -623,9 +623,14 @@ def _clean_self_talk_texts(value):
 
 
 def _default_dynamic_island_data() -> dict:
-    """灵动岛默认配置：默认开启常驻，位置留空由首次显示时自动定位。"""
+    """灵动岛默认配置：默认关闭，位置留空由首次显示时自动定位。
+
+    2026-11-03：默认值从 True 改为 False，与设置页的缺省读法
+    （``island_cfg.get("enabled", False)``）对齐。新装用户不再被常驻胶囊
+    打扰；已显式开启的老配置原样保留，可从托盘 / Dock 菜单关闭。
+    """
     return {
-        "enabled": True,
+        "enabled": False,
         "show_icon": True,
         "show_name": True,
         "show_info": True,

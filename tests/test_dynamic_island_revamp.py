@@ -377,6 +377,15 @@ def test_appearance_opacity_and_accent(tmp_path):
 
 
 # ------------------------------------------------------------ 配置清洗
+def test_default_dynamic_island_is_hidden(tmp_path):
+    """新装默认不展示灵动岛；显式开启的配置原样保留。"""
+    cfg = Config(base=tmp_path)
+    assert cfg.get("dynamic_island")["enabled"] is False
+
+    cfg.set("dynamic_island", {"enabled": True})
+    assert cfg.get("dynamic_island")["enabled"] is True
+
+
 def test_config_cleans_new_island_keys(tmp_path):
     cfg = Config(base=tmp_path)
     cfg.set("dynamic_island", {

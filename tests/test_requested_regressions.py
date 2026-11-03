@@ -1724,6 +1724,38 @@ def test_macos_dock_menu_keeps_settings_reachable_when_pet_is_mouse_through(monk
     app.processEvents()
 
 
+def test_macos_dock_menu_can_hide_dynamic_island(tmp_path, monkeypatch):
+    """Dock 菜单也能关灵动岛：勾选态读配置，触发后写盘并同步岛窗。"""
+    from unittest import mock
+
+    from PySide6.QtWidgets import QApplication
+
+    import pet.app as app_mod
+    from pet.config import Config
+
+    app = QApplication.instance() or QApplication([])
+    controller = app_mod.AppShell.__new__(app_mod.AppShell)
+    controller.app = app
+    controller.enable_chat = True
+    controller.instance = app_mod.PetInstance.__new__(app_mod.PetInstance)
+    controller.instance.win = mock.Mock()
+    controller.config = Config(tmp_path)
+    controller._sync_dynamic_island = mock.Mock()
+    monkeypatch.setattr(app_mod.sys, "platform", "darwin")
+    monkeypatch.setattr(app_mod.feature_activation_mod, "is_active", lambda _fid: True)
+
+    menu = controller._install_macos_dock_menu()
+    action = next(a for a in menu.actions() if a.text() == "显示灵动岛")
+    assert action.isCheckable()
+    assert action.isChecked() is False, "新装默认不展示灵动岛"
+
+    action.trigger()
+    assert controller.config.get("dynamic_island")["enabled"] is True
+    assert controller._sync_dynamic_island.call_count == 1
+    menu.close()
+    app.processEvents()
+
+
 # --- 评审回归：碰撞分离累计写回 / 隐藏宠退出碰撞世界（2026-10-03）---
 
 

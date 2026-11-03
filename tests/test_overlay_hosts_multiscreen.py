@@ -1547,6 +1547,11 @@ def test_drag_domain_covers_the_physical_extent_of_a_high_dpi_screen(
     1920+960=2880，而那块屏的物理右缘是 1920+1920=3840 —— 宠拖到中段就跟不上
     鼠标（鼠标还在动，位置被域钳住）。
     """
+    import pet.overlay_shell as overlay_mod
+
+    # 这条钉的是 Windows 的物理平面（macOS 走逻辑平面，见
+    # test_overlay_cross_dpi_macos.py）；测试跑在 macOS 上也必须显式选物理平面。
+    monkeypatch.setattr(overlay_mod, "_IS_WINDOWS", True, raising=False)
     shell, a, b = _mixed_dpr_shell(tmp_path, monkeypatch)
     try:
         host_a = shell.host_for_screen(a)

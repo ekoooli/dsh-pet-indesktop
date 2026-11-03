@@ -438,6 +438,8 @@ def test_v1_long_hints_fit_their_labels_at_compact_width(tmp_path, monkeypatch):
     """
     dialog, _cfg = _dialog(tmp_path, monkeypatch)
     try:
+        # 灵动岛默认关闭（2026-11-03）；本用例量的是岛内行的布局，先把岛和网络打开。
+        dialog.island_enabled_check.setChecked(True)
         dialog.island_network_check.setChecked(True)  # 网络组的行依赖满足才参与布局
         dialog.resize(dialog.minimumSize())
         dialog.show()
@@ -564,6 +566,8 @@ def test_v4_search_reports_the_hidden_dependency_without_changing_config(tmp_pat
     """依赖不满足：不改配置、给可见的依赖说明；前置开关打开后同一查询能找到并展开。"""
     dialog, cfg = _cfg_dialog(tmp_path, monkeypatch)
     try:
+        # 灵动岛默认关闭（2026-11-03）；本用例验证的是「岛开着但网络槽关着」的依赖链。
+        dialog.island_enabled_check.setChecked(True)
         assert cfg.get("island_network_enabled") is False
         row = _search(dialog, "探测间隔")
         assert row.objectName() == "settingRow_network_probe_interval"

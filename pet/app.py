@@ -3472,15 +3472,46 @@ class AppShell:
         except (AttributeError, RuntimeError):
             logging.exception("把窗口接入共享 Agent 联动链失败")
 
+    def set_dynamic_island_enabled(self, enabled: bool) -> None:
+        """持久化灵动岛的显示开关并立即生效（托盘 / Dock 菜单共用）。
+
+        ``dynamic_island.enabled`` 是岛的行为开关，不是功能模块激活门；调用方
+        负责判断 ``feature_activation.is_active("dynamic_island")``。老配置里
+        显式开启的岛不会被默认值改动，只能由这个入口（或设置页）关闭。
+        """
+        config = getattr(self, "config", None)
+        if config is None:
+            return
+        island_cfg = config.get("dynamic_island", {})
+        island_cfg = dict(island_cfg) if isinstance(island_cfg, dict) else {}
+        island_cfg["enabled"] = bool(enabled)
+        config.set("dynamic_island", island_cfg)
+        config.save()
+        action = getattr(self, "_dock_island_action", None)
+        if action is not None:
+            try:
+                action.setChecked(bool(enabled))
+            except RuntimeError:
+                pass
+        self._sync_dynamic_island()
+
+    def _island_enabled_from_config(self) -> bool:
+        """当前配置里的灵动岛行为开关（缺省关闭）。"""
+        config = getattr(self, "config", None)
+        if config is None:
+            return False
+        island_cfg = config.get("dynamic_island", {})
+        return bool(island_cfg.get("enabled", False)) if isinstance(island_cfg, dict) else False
+
     def _sync_dynamic_island(self) -> None:
         """按配置创建/隐藏灵动岛；桌宠隐藏后灵动岛仍可常驻。"""
         island_cfg = self.config.get("dynamic_island", {})
-        enabled = bool(island_cfg.get("enabled", True)) if isinstance(island_cfg, dict) else False
+        enabled = bool(island_cfg.get("enabled", False)) if isinstance(island_cfg, dict) else False
         if not feature_activation_mod.is_active("dynamic_island"):
             # 功能模块未激活 = 岛**不创建**（下面的 hide 分支只停定时器，岛对象、
             # 四路采样槽与 FPS 订阅都还留着，那条路径不算停用）。岛自己的
-            # ``dynamic_island.enabled`` 是行为开关，两处缺省值本来就不一致
-            # （config 默认 True / 设置页默认 False），绝不拿它判模块激活。
+            # ``dynamic_island.enabled`` 是行为开关（默认 False，与设置页缺省
+            # 值一致），绝不拿它判模块激活。
             enabled = False
         if not enabled:
             if getattr(self, "island", None) is not None:
@@ -3641,7 +3672,7 @@ class AppShell:
         if island is None or not shiboken6.isValid(island):
             return False
         island_cfg = self.config.get("dynamic_island", {})
-        if isinstance(island_cfg, dict) and not bool(island_cfg.get("enabled", True)):
+        if isinstance(island_cfg, dict) and not bool(island_cfg.get("enabled", False)):
             return False
         try:
             return bool(island.isVisible())
@@ -4758,6 +4789,17 @@ class AppShell:
         menu.addAction("桌宠设置", lambda: self.instance is not None and self.instance.open_modern_settings())
         if self.enable_chat:
             menu.addAction("AI 对话", lambda: self.instance is not None and self.instance.open_chat())
+        if feature_activation_mod.is_active("dynamic_island"):
+            island_action = menu.addAction("显示灵动岛")
+            island_action.setCheckable(True)
+            island_action.setChecked(self._island_enabled_from_config())
+            # 勾选态由 triggered 驱动：aboutToShow / 托盘同步里的程序化
+            # setChecked 只改看相，不写配置（与托盘 add_tray_toggle 同纪律）。
+            island_action.triggered.connect(
+                lambda checked=False: self.set_dynamic_island_enabled(bool(checked)))
+            menu.aboutToShow.connect(
+                lambda: island_action.setChecked(self._island_enabled_from_config()))
+            self._dock_island_action = island_action
         menu.addSeparator()
         quit_callback = getattr(self.app, "quit", None)
         if callable(quit_callback):
@@ -5043,11 +5085,7 @@ class AppShell:
         add_tray_action(menu, '回到右下角', lambda: win.go_default_corner())
 
         def toggle_island(enabled: bool) -> None:
-            island_cfg = dict(self.config.get("dynamic_island", {}) or {})
-            island_cfg["enabled"] = bool(enabled)
-            self.config.set("dynamic_island", island_cfg)
-            self.config.save()
-            self._sync_dynamic_island()
+            self.set_dynamic_island_enabled(enabled)
 
         island_action = None
         if feature_activation_mod.is_active("dynamic_island"):
@@ -5055,7 +5093,7 @@ class AppShell:
             # 不出现（它是绕过设置页的第二条入口，留着就是「界面藏了、开关还在」）。
             island_action = add_tray_toggle(
                 menu, '灵动岛',
-                bool(self.config.get("dynamic_island", {}).get("enabled", True)),
+                self._island_enabled_from_config(),
                 toggle_island)
 
         if self.enable_chat:
@@ -5091,9 +5129,7 @@ class AppShell:
             mouse_through.setChecked(bool(self.config.get('mouse_through', False)))
             auto.setChecked(autostart_mod.is_enabled())
             if island_action is not None:
-                island_action.setChecked(bool(
-                    self.config.get("dynamic_island", {}).get("enabled", True)
-                ))
+                island_action.setChecked(self._island_enabled_from_config())
 
         menu.aboutToShow.connect(sync_tray_checks)
 

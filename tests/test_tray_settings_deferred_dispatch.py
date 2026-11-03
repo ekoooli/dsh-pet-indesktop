@@ -422,6 +422,27 @@ def test_overlay_tray_show_hide_waits_for_menu_close(tmp_path):
         _close_overlay_tray(shell)
 
 
+def test_overlay_tray_island_toggle_waits_for_menu_close(tmp_path):
+    """overlay 托盘的「灵动岛」：勾选态即时翻转，写配置/同步岛等菜单关闭后。"""
+    shell, menu = _overlay_tray(tmp_path)
+    calls: list = []
+    shell._instance.shell = SimpleNamespace(
+        set_dynamic_island_enabled=lambda enabled: calls.append(bool(enabled)))
+    try:
+        action = _entry(menu, "灵动岛")
+        assert action.isChecked() is False, "新装默认不展示灵动岛"
+        _open_menu(menu)
+
+        action.trigger()
+        assert action.isChecked() is True, "勾选态必须即时翻转"
+        assert calls == [], "菜单还开着，岛同步不许内联执行"
+        assert not menu.isVisible(), "点击后菜单必须先关"
+
+        assert _wait_until(lambda: calls == [True]), "菜单关闭后必须同步一次岛"
+    finally:
+        _close_overlay_tray(shell)
+
+
 def test_overlay_tray_return_to_corner_waits_for_menu_close(tmp_path):
     """overlay 托盘「回到右下角」：移动主 sprite，同样不内联执行。"""
     shell, menu = _overlay_tray(tmp_path)

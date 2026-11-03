@@ -86,6 +86,9 @@ from collections import deque
 from pathlib import Path
 
 _IS_MACOS = sys.platform == "darwin"
+#: 跨窗坐标映射是否必须走物理像素。只有 Windows 的每显示器 DPI 会让 Qt 逻辑
+#: 桌面不连续；macOS/Linux 的全局坐标按点连续，乘 DPR 反而制造偏移。
+_IS_WINDOWS = sys.platform == "win32"
 
 import shiboken6
 from PySide6.QtCore import (
@@ -1680,10 +1683,11 @@ class OverlayShell(QObject):
 
     @staticmethod
     def _window_physical_origin(overlay) -> QPoint:
-        """窗口的**原生（物理）**左上角；取不到时退回逻辑原点。
+        """窗口的映射原点：Windows = 原生物理左上角；其它平台 = 逻辑左上角。
 
-        混合 DPI 下逻辑原点不能当物理用：Qt 官方文档的 islands-of-screens ——
-        屏的位置不随缩放变，逻辑桌面不是连续平面。跨窗换算必须走物理坐标。
+        Windows 的每显示器 DPI 让 Qt 逻辑桌面不连续（islands-of-screens），
+        跨窗换算必须走物理坐标。macOS/Linux 的全局坐标本身按点连续，用逻辑
+        原点即可；具体选哪个平面由 ``_window_mapping_scale`` 决定。
         """
         fallback = overlay.geometry().topLeft()
         try:
@@ -1698,16 +1702,30 @@ class OverlayShell(QObject):
             return fallback
         return QPoint(rect.left, rect.top)
 
-    def _sprite_pos_in(self, sprite, source_overlay, target_overlay) -> QPointF:
-        """这只的左上角换算到 ``target_overlay`` 的局部逻辑坐标（跨 DPI 正确）。
+    @staticmethod
+    def _window_mapping_scale(overlay) -> float:
+        """跨窗映射平面的 DPR 倍率（Windows 物理像素，其它平台逻辑点）。
 
-        物理 = 源窗物理原点 + d_src × 源局部；目标局部 = (物理 − 目标窗物理原点)/d_dst。
-        少了这里的两处 DPR 比例，换窗本身就会位移几百像素——实机的"瞬移"。
+        macOS 实测：小屏 DPR 2 → 大屏 DPR 1 拖拽时，``p_src + pos × 2`` 会把
+        目标局部坐标算偏几百像素，表现为宠跟不上鼠标/松手后错位；而 macOS 的
+        全局坐标按点连续，正确换算是 ``p_src + pos - p_dst``，倍率恒为 1。
+        """
+        if not _IS_WINDOWS:
+            return 1.0
+        return float(overlay.devicePixelRatioF()) or 1.0
+
+    def _sprite_pos_in(self, sprite, source_overlay, target_overlay) -> QPointF:
+        """这只的左上角换算到 ``target_overlay`` 的局部逻辑坐标。
+
+        映射平面上：全局 = 源窗原点 + scale × 源局部；目标局部 =
+        (全局 − 目标窗原点) / scale。Windows 的 scale = DPR（物理平面），
+        macOS/Linux 的 scale = 1（逻辑平面）——后者乘 DPR 正是混合缩放
+        跨屏时鼠标偏移的根因。
         """
         p_src = self._window_physical_origin(source_overlay)
         p_dst = self._window_physical_origin(target_overlay)
-        d_src = float(source_overlay.devicePixelRatioF()) or 1.0
-        d_dst = float(target_overlay.devicePixelRatioF()) or 1.0
+        d_src = self._window_mapping_scale(source_overlay)
+        d_dst = self._window_mapping_scale(target_overlay)
         phys = QPointF(p_src.x() + sprite.pos.x() * d_src,
                        p_src.y() + sprite.pos.y() * d_src)
         return QPointF((phys.x() - p_dst.x()) / d_dst,
@@ -4434,6 +4452,29 @@ class OverlayShell(QObject):
         add_tray_action(menu, "显示 / 隐藏", self._toggle_pet_visible)
         add_tray_action(menu, "回到右下角",
                         lambda: self._go_default_corner(self.sprite))
+        # 灵动岛是进程级窗口，overlay 拓扑下用户实际看到的是本托盘：legacy
+        # 托盘早已有这条开关，overlay 侧此前只有设置页一条路（用户反馈
+        # 「只能缩小、没法关闭」）。勾选态与配置同源，副作用等菜单关闭后
+        # 由 AppShell.set_dynamic_island_enabled 统一写盘并同步岛窗。
+        island_action = None
+        if feature_activation.is_active("dynamic_island"):
+            def sync_island_check() -> None:
+                cfg = self._config.get("dynamic_island", {})
+                island_action.setChecked(
+                    bool(cfg.get("enabled", False)) if isinstance(cfg, dict) else False)
+
+            def apply_island(enabled: bool) -> None:
+                shell = getattr(self._instance, "shell", None)
+                setter = getattr(shell, "set_dynamic_island_enabled", None)
+                if callable(setter):
+                    setter(bool(enabled))
+
+            cfg = self._config.get("dynamic_island", {})
+            island_action = add_tray_toggle(
+                menu, "灵动岛",
+                bool(cfg.get("enabled", False)) if isinstance(cfg, dict) else False,
+                apply_island)
+            menu.aboutToShow.connect(sync_island_check)
         menu.addSeparator()
         add_tray_action(menu, "生成 / 恢复 slot0（档案损坏，见日志）"
                         if self.slot0_profile_diagnosis() and self.sprite is None
@@ -5161,23 +5202,25 @@ class OverlayShell(QObject):
         self._drag_relaxed_sprite = sprite
 
     def _drag_domain_local(self, host) -> QRectF | None:
-        """拖拽放宽域（源窗局部）：全部屏的**物理**外接矩形换算到源窗局部。
+        """拖拽放宽域（源窗局部）：全部屏按**当前映射平面**的外接矩形。
 
-        逻辑坐标不能直接用：混合缩放下 Qt 的逻辑桌面是 islands-of-screens，一块
-        1920 物理 @200% 的屏只占 960 逻辑宽；而源窗局部的单位是它自己的逻辑像素
-        （DPR 1.0 时就是物理像素）。拿各屏**逻辑**矩形求并集会把高 DPI 屏的物理
-        范围算小，实机表现是宠拖到那块屏中段就跟不上鼠标（鼠标还在动，宠被域钳住）。
-        物理空洞包含在内是有意的——拖拽期间允许身体经过无显示器的缝，松手才按
+        Windows 走物理像素：混合缩放下 Qt 的逻辑桌面是 islands-of-screens，
+        一块 1920 物理 @200% 的屏只占 960 逻辑宽；按逻辑求并集会把高 DPI 屏的
+        物理范围算小，实机表现是宠拖到那块屏中段就跟不上鼠标。
+
+        macOS/Linux 的全局坐标按点连续，映射倍率是 1；这里若仍乘 DPR，小屏
+        DPR 2 → 大屏 DPR 1 的拖拽域会少掉近半块屏——正是用户报的"越拖越偏"。
+        屏间空洞包含在内是有意的：拖拽期间允许身体经过无显示器的缝，松手才按
         真实屏钳回来。
         """
         if not self._hosts or host is None:
             return None
         p_src = self._window_physical_origin(host.overlay)
-        d_src = float(host.overlay.devicePixelRatioF()) or 1.0
+        d_src = self._window_mapping_scale(host.overlay)
         left = top = right = bottom = None
         for other in self._hosts:
             origin = self._window_physical_origin(other.overlay)
-            d_dst = float(other.overlay.devicePixelRatioF()) or 1.0
+            d_dst = self._window_mapping_scale(other.overlay)
             geometry = other.overlay.geometry()
             width_px = geometry.width() * d_dst
             height_px = geometry.height() * d_dst
@@ -5227,16 +5270,18 @@ class OverlayShell(QObject):
 
     def _place_sprite_in_physical_screen(self, sprite, host=None, *,
                                          persist: bool = False) -> bool:
-        """按**物理**身体中心把这只交到它现在所在那块屏的窗（多窗的归属落地）。
+        """按**映射平面**上的身体中心把这只交到它现在所在那块屏的窗。
 
-        拖拽期间不调用（跨缝靠投影）；松手后的收尾与每拍兜底都走这里，因此不依赖
-        某个窗口的 grab 收尾钩子有没有被触发。
+        Windows = 物理平面，macOS/Linux = 逻辑平面（见
+        ``_window_mapping_scale``）。拖拽期间不调用（跨缝靠投影）；松手后的
+        收尾与每拍兜底都走这里，因此不依赖某个窗口的 grab 收尾钩子有没有被
+        触发。
         """
         own = host or self._host_of(sprite)
         if own is None or sprite is None:
             return False
         p_src = self._window_physical_origin(own.overlay)
-        d_src = float(own.overlay.devicePixelRatioF()) or 1.0
+        d_src = self._window_mapping_scale(own.overlay)
         # body_rect() 已经是**局部绝对**矩形（已含 pos），不要再加一次 pos
         body = sprite.body_rect()
         cx = p_src.x() + (body.x() + body.width() / 2.0) * d_src
@@ -5245,7 +5290,7 @@ class OverlayShell(QObject):
             if other is own:
                 continue
             origin = self._window_physical_origin(other.overlay)
-            d_dst = float(other.overlay.devicePixelRatioF()) or 1.0
+            d_dst = self._window_mapping_scale(other.overlay)
             area = QRect(origin.x(), origin.y(),
                          int(other.overlay.geometry().width() * d_dst),
                          int(other.overlay.geometry().height() * d_dst))

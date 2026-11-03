@@ -83,6 +83,17 @@ recovery
 
 ## 变更记录
 
+### 2026-11-03 — 灵动岛默认关闭 + 托盘/Dock 显示开关（已有键，无新键）
+
+| 项 | 内容 |
+|---|---|
+| 键 | `dynamic_island.enabled`（已有键，出厂默认 `true` → `false`；设置页缺省读法本来就是 `false`） |
+| 入口 | legacy 托盘已有「灵动岛」勾选；本次补到 overlay 托盘（`OverlayShell._refresh_tray_menu`）与 macOS Dock 菜单（`AppShell._install_macos_dock_menu`） |
+| 行为 | 勾选态读 `dynamic_island.enabled`；菜单关闭后由 `AppShell.set_dynamic_island_enabled` 写盘并 `_sync_dynamic_island()`（`hide()` + 摘岛桥/碰撞墙）。模块未激活时入口不出现 |
+| 兼容 | 已显式开启的老配置原样保留（不迁移、不覆盖用户选择）；新装默认不展示；设置页「启用灵动岛」行不变 |
+| 测试 | `test_default_dynamic_island_is_hidden`、`test_overlay_tray_island_toggle_waits_for_menu_close`、`test_macos_dock_menu_can_hide_dynamic_island`；相关托盘/岛/配置族 232 passed |
+| 平台 | 托盘三端共用；Dock 菜单仅 macOS。真实 GUI 验收：macOS arm64 本机构建 + 安装后启动 |
+
 ### 2026-10-21 — 新增一级域「功能」（功能模块启用/停用卡片，staged 语义）
 
 本刀**新增 1 个一级能力域与 1 个持久设置的可见入口**（`feature_activation` 键与迁移
